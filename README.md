@@ -58,9 +58,28 @@ O **Antoni** foi projetado para crianças em fase de alfabetização (5 a 7 anos
 - Quadro de pintura digital com cores vibrantes e pincel responsivo.
 - Opção para a própria criança tentar ler em voz alta e gravar o áudio no livro.
 
-### 📚 8. Minha Estante de Livros
-- Coleção permanente onde todos os livros completados ficam guardados.
+### 🧠 8. Seletor Multi-IA & BYOK (Bring Your Own Key)
+- Permite que o usuário ou educador escolha a IA de sua preferência com 1 clique direto no topo do aplicativo:
+  - 🟣 **Anthropic Claude** (`claude-3-5-haiku`, `claude-3-5-sonnet`)
+  - 🔵 **Google Gemini / AI Studio** (`gemini-2.0-flash`, `gemini-1.5-pro`)
+  - ⚪ **xAI Grok** (`grok-2-latest`, `grok-beta`)
+  - 🟢 **OpenAI** (`gpt-4o-mini`, `gpt-4o`)
+  - 🟠 **Devin / Custom** (compatível com OpenRouter, DeepSeek, Ollama e qualquer endpoint padrão OpenAI)
+- **Segurança & Privacidade:** As chaves de API coladas no aplicativo são mantidas no navegador do usuário (`localStorage`), sem serem expostas ou compartilhadas.
+- **Teste de Conexão em Tempo Real:** Botão para testar a comunicação com a API selecionada antes de começar a criar histórias.
+
+### 📚 9. Minha Estante Infinita (IndexedDB)
+- Armazenamento permanente via banco de dados nativo do navegador (**IndexedDB**), permitindo guardar **infinitas histórias** sem as restrições de 5MB do `localStorage`.
 - Leitor interativo com capa personalizada, áudio do narrador e gravação da criança.
+
+### 📦 10. Backup em ZIP & Compartilhamento via AirDrop
+- **Exportação Completa da Coleção (.ZIP):** Empacota todas as historinhas com pastas organizadas:
+  - `README.md` (resumo legível em Markdown)
+  - `livros.json` (metadados estruturados para IAs e outros apps)
+  - `capas/` (ilustrações em alta resolução)
+  - `vozes/` (gravações de áudio em formato PCM WAV)
+- **Compartilhamento por AirDrop:** Integração com a Folha de Compartilhamento Nativa do iOS e macOS para enviar livros individuais ou a biblioteca inteira instantaneamente por AirDrop ou WhatsApp.
+- **Importador de Livros:** Restauração em 1 clique de arquivos `.zip` ou `.json` em outro navegador ou dispositivo.
 
 ---
 
@@ -69,16 +88,16 @@ O **Antoni** foi projetado para crianças em fase de alfabetização (5 a 7 anos
 ```
 antoni/
 ├── assets/                     # Imagens e logo da aplicação
-├── backend/                    # Servidor Node.js Express + Whisper STT + Claude API
+├── backend/                    # Servidor Node.js Express + Whisper STT + Multi-AI Router
 │   ├── Dockerfile              # Imagem Node.js Slim com glibc para ONNX Runtime
-│   ├── index.js                # Endpoints /api/parse e /api/transcribe
+│   ├── index.js                # Endpoints /api/parse (Claude, Gemini, Grok, OpenAI) e /api/transcribe
 │   └── package.json
 ├── src/                        # Aplicação React Native (Expo Web)
-│   ├── components/             # AudioBar, StickerCard, GapSlot, DrawingCover, etc.
-│   ├── lib/                    # aiParser, soundEffects, syllables, tts, useSpeechRecorder
+│   ├── components/             # AudioBar, StickerCard, GapSlot, DrawingCover, AIProviderModal, etc.
+│   ├── lib/                    # aiParser, soundEffects, syllables, tts, useSpeechRecorder, zipBackup
 │   ├── screens/                # StoryRecorderScreen, GameCanvasScreen, BookshelfScreen
-│   └── store/                  # Zustand (gameStore, bookshelfStore com persistência)
-├── docker-compose.yml          # Orquestração dos containers Web (Nginx) e API (Node)
+│   └── store/                  # Zustand (gameStore, bookshelfStore [IndexedDB], aiProviderStore)
+├── docker-compose.yml          # Orquestração dos containers Web (Nginx), API (Node) e Cloudflare Tunnel
 ├── Dockerfile.web              # Build estático do Expo Web servido via Nginx
 └── nginx.conf                  # Proxy reverso e headers anti-cache
 ```
@@ -89,13 +108,19 @@ antoni/
 
 ### Pré-requisitos
 - [Docker](https://www.docker.com/) e Docker Compose instalados
-- Chave de API da Anthropic (`ANTHROPIC_API_KEY`)
+- Pelo menos uma chave de API (Anthropic, Google Gemini, xAI ou OpenAI)
 
-### 1. Configurar as Variáveis de Ambiente
-Crie um arquivo `.env` na raiz do projeto:
+### 1. Configurar as Variáveis de Ambiente (Opcional)
+Crie um arquivo `.env` na raiz do projeto para definir as chaves padrão do servidor (os usuários também podem colar suas próprias chaves direto na interface):
 
 ```env
+# Provedor padrão (Claude)
 ANTHROPIC_API_KEY=sua_chave_anthropic_aqui
+
+# Provedores adicionais (opcional)
+GEMINI_API_KEY=sua_chave_gemini_aqui
+XAI_API_KEY=sua_chave_xai_grok_aqui
+OPENAI_API_KEY=sua_chave_openai_aqui
 ```
 
 ### 2. Rodar com Docker Compose (Recomendado)
