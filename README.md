@@ -67,7 +67,7 @@ O **Antoni** foi projetado para crianças em fase de alfabetização (5 a 7 anos
 ## 🛠️ Arquitetura & Tecnologias
 
 ```
-fairytales/
+antoni/
 ├── assets/                     # Imagens e logo da aplicação
 ├── backend/                    # Servidor Node.js Express + Whisper STT + Claude API
 │   ├── Dockerfile              # Imagem Node.js Slim com glibc para ONNX Runtime
