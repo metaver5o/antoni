@@ -464,23 +464,26 @@ export const BookshelfScreen: React.FC = () => {
           <View
             style={{
               flex: 1,
-              backgroundColor: 'rgba(30, 27, 75, 0.75)',
+              backgroundColor: 'rgba(15, 23, 42, 0.8)',
               justifyContent: 'center',
               alignItems: 'center',
-              padding: 16,
+              padding: isWeb ? 16 : 8,
             }}
           >
             <View
               style={{
                 backgroundColor: '#FFFFFF',
-                borderRadius: 28,
+                borderRadius: 24,
                 width: '100%',
-                maxWidth: 580,
-                maxHeight: '90%',
+                maxWidth: 560,
+                height: isWeb ? '88%' : '94%',
+                maxHeight: isWeb ? 740 : '94%',
                 overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
                 shadowColor: '#000',
                 shadowOffset: { width: 0, height: 10 },
-                shadowOpacity: 0.3,
+                shadowOpacity: 0.35,
                 shadowRadius: 20,
                 elevation: 10,
               }}
@@ -488,43 +491,58 @@ export const BookshelfScreen: React.FC = () => {
               {/* Reader Header */}
               <View
                 style={{
-                  backgroundColor: activeBook?.coverColor,
-                  paddingHorizontal: 20,
-                  paddingVertical: 18,
+                  backgroundColor: activeBook?.coverColor || '#7C3AED',
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
+                  flexShrink: 0,
                 }}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Text style={{ fontSize: 32 }}>{activeBook?.coverEmoji}</Text>
-                  <View>
-                    <Text style={{ fontSize: 18, fontWeight: '900', color: '#FFF' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                  <Text style={{ fontSize: 26 }}>{activeBook?.coverEmoji}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>
                       {activeBook?.title}
                     </Text>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.85)' }}>
-                      Escrito por você em {activeBook?.createdAt}
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.85)' }}>
+                      Criado em {activeBook?.createdAt}
                     </Text>
                   </View>
                 </View>
 
-                <Pressable onPress={handleCloseModal} hitSlop={10}>
-                  <X size={24} color="#FFF" />
+                <Pressable
+                  onPress={handleCloseModal}
+                  hitSlop={12}
+                  style={({ pressed }) => ({
+                    padding: 4,
+                    backgroundColor: pressed ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.1)',
+                    borderRadius: 12,
+                    cursor: isWeb ? ('pointer' as const) : undefined,
+                  })}
+                >
+                  <X size={20} color="#FFF" />
                 </Pressable>
               </View>
 
-              <ScrollView contentContainerStyle={{ padding: 24 }}>
+              {/* Scrollable Modal Content */}
+              <ScrollView
+                style={{ flex: 1, width: '100%' }}
+                contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+              >
                 {/* Drawing Banner if present */}
                 {activeBook?.drawingDataUrl && (
-                  <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                  <View style={{ alignItems: 'center', marginBottom: 14 }}>
                     <Image
                       source={{ uri: activeBook.drawingDataUrl }}
                       style={{
                         width: '100%',
-                        height: 180,
-                        borderRadius: 18,
-                        borderWidth: 2,
+                        height: 125,
+                        borderRadius: 14,
+                        borderWidth: 1.5,
                         borderColor: '#E5E7EB',
+                        backgroundColor: '#FFF',
                       }}
                       resizeMode="contain"
                     />
@@ -535,14 +553,14 @@ export const BookshelfScreen: React.FC = () => {
                 <View
                   style={{
                     backgroundColor: '#F5F3FF',
-                    borderRadius: 20,
-                    padding: 20,
-                    borderWidth: 2,
+                    borderRadius: 16,
+                    padding: 14,
+                    borderWidth: 1.5,
                     borderColor: '#DDD6FE',
-                    marginBottom: 20,
+                    marginBottom: 14,
                   }}
                 >
-                  <Text style={{ fontSize: 24, lineHeight: 40, fontWeight: '700', color: '#1F2937' }}>
+                  <Text style={{ fontSize: 17, lineHeight: 28, fontWeight: '700', color: '#1F2937' }}>
                     {(activeBook ? getWordSpans(activeBook.fullStory) : []).map((span, i) => {
                       const isHighlighted = span.index === activeWordIdx;
                       return (
@@ -554,8 +572,8 @@ export const BookshelfScreen: React.FC = () => {
                                     backgroundColor: '#FEF08A',
                                     color: '#4C1D95',
                                     fontWeight: '900',
-                                    borderRadius: 6,
-                                    paddingHorizontal: 4,
+                                    borderRadius: 4,
+                                    paddingHorizontal: 3,
                                   }
                                 : undefined
                             }
@@ -570,24 +588,24 @@ export const BookshelfScreen: React.FC = () => {
                 </View>
 
                 {/* Syllables breakdown guide */}
-                <View style={{ marginBottom: 24 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', marginBottom: 8 }}>
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', marginBottom: 6 }}>
                     🔤 Sílabas das Palavras-Chave:
                   </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                     {activeBook?.gaps.map((g) => (
                       <View
                         key={g.id}
                         style={{
                           backgroundColor: '#EDE9FE',
-                          borderRadius: 12,
-                          paddingHorizontal: 12,
-                          paddingVertical: 6,
+                          borderRadius: 10,
+                          paddingHorizontal: 10,
+                          paddingVertical: 4,
                           borderWidth: 1,
                           borderColor: '#C4B5FD',
                         }}
                       >
-                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#5B21B6' }}>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: '#5B21B6' }}>
                           {g.word}: <Text style={{ color: '#7C3AED' }}>{formatSyllableString(g.word)}</Text>
                         </Text>
                       </View>
@@ -595,14 +613,14 @@ export const BookshelfScreen: React.FC = () => {
                   </View>
                 </View>
 
-                {/* Audio controls */}
-                <View style={{ gap: 10 }}>
+                {/* Audio & Action controls */}
+                <View style={{ gap: 8 }}>
                   <Pressable
                     onPress={handlePlayTTS}
                     style={({ pressed }) => ({
                       backgroundColor: isPlayingTTS ? '#DC2626' : '#7C3AED',
-                      paddingVertical: 14,
-                      borderRadius: 16,
+                      paddingVertical: 12,
+                      borderRadius: 14,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -613,13 +631,13 @@ export const BookshelfScreen: React.FC = () => {
                   >
                     {isPlayingTTS ? (
                       <>
-                        <Pause size={20} color="#FFF" fill="#FFF" />
-                        <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>Pausar Narração</Text>
+                        <Pause size={18} color="#FFF" fill="#FFF" />
+                        <Text style={{ fontSize: 15, fontWeight: '900', color: '#FFF' }}>Pausar Narração</Text>
                       </>
                     ) : (
                       <>
-                        <Volume2 size={20} color="#FFF" />
-                        <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>Ouvir História Narrada</Text>
+                        <Volume2 size={18} color="#FFF" />
+                        <Text style={{ fontSize: 15, fontWeight: '900', color: '#FFF' }}>Ouvir História Narrada</Text>
                       </>
                     )}
                   </Pressable>
@@ -629,8 +647,8 @@ export const BookshelfScreen: React.FC = () => {
                       onPress={handlePlayChildVoice}
                       style={({ pressed }) => ({
                         backgroundColor: isPlayingChildVoice ? '#DC2626' : '#059669',
-                        paddingVertical: 14,
-                        borderRadius: 16,
+                        paddingVertical: 12,
+                        borderRadius: 14,
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -641,13 +659,13 @@ export const BookshelfScreen: React.FC = () => {
                     >
                       {isPlayingChildVoice ? (
                         <>
-                          <Pause size={20} color="#FFF" fill="#FFF" />
-                          <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>Pausar Minha Voz</Text>
+                          <Pause size={18} color="#FFF" fill="#FFF" />
+                          <Text style={{ fontSize: 15, fontWeight: '900', color: '#FFF' }}>Pausar Minha Voz</Text>
                         </>
                       ) : (
                         <>
-                          <Mic size={20} color="#FFF" />
-                          <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>
+                          <Mic size={18} color="#FFF" />
+                          <Text style={{ fontSize: 15, fontWeight: '900', color: '#FFF' }}>
                             Ouvir Minha Voz Lendo 🌟
                           </Text>
                         </>
@@ -661,8 +679,8 @@ export const BookshelfScreen: React.FC = () => {
                     disabled={isSharingBook}
                     style={({ pressed }) => ({
                       backgroundColor: isSharingBook ? '#9CA3AF' : pressed ? '#1E40AF' : '#2563EB',
-                      paddingVertical: 14,
-                      borderRadius: 16,
+                      paddingVertical: 12,
+                      borderRadius: 14,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -671,8 +689,8 @@ export const BookshelfScreen: React.FC = () => {
                       cursor: isWeb && !isSharingBook ? ('pointer' as const) : undefined,
                     })}
                   >
-                    <Share2 size={20} color="#FFF" />
-                    <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>
+                    <Share2 size={18} color="#FFF" />
+                    <Text style={{ fontSize: 15, fontWeight: '900', color: '#FFF' }}>
                       {isSharingBook ? 'Preparando...' : 'Compartilhar História (AirDrop) 📤'}
                     </Text>
                   </Pressable>
@@ -690,12 +708,12 @@ export const BookshelfScreen: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 6,
-                      marginTop: 6,
-                      padding: 8,
+                      marginTop: 4,
+                      padding: 6,
                     }}
                   >
-                    <Trash2 size={16} color="#EF4444" />
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#EF4444' }}>
+                    <Trash2 size={14} color="#EF4444" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#EF4444' }}>
                       Remover este livro da estante
                     </Text>
                   </Pressable>
