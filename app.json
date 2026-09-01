@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Histórias do Antoni",
+    "slug": "historias-do-antoni",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#F5F3FF"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "FairyTales needs your microphone to record your story."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F3FF"
+      },
+      "permissions": ["android.permission.RECORD_AUDIO"]
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "FairyTales needs your microphone to record your story."
+        }
+      ]
+    ]
+  }
+}
