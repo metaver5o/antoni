@@ -14,19 +14,25 @@ interface SpeechRecognitionErrorEvent {
 
 export type RecorderState = 'IDLE' | 'REQUESTING' | 'RECORDING' | 'PROCESSING';
 
+export interface SpeechRecordingResult {
+  transcript: string;
+  audioUrl: string | null;
+}
+
 interface UseSpeechRecorder {
   recorderState: RecorderState;
   interimTranscript: string;
   elapsedSeconds: number;
   errorMessage: string | null;
   startRecording: () => Promise<void>;
-  stopRecording: () => Promise<string>;
+  stopRecording: () => Promise<SpeechRecordingResult>;
   clearError: () => void;
 }
 
 const API_URL =
-  (typeof process !== 'undefined' && process.env.EXPO_PUBLIC_API_URL) ||
-  'http://localhost:3001';
+  typeof process !== 'undefined' && typeof process.env.EXPO_PUBLIC_API_URL === 'string'
+    ? process.env.EXPO_PUBLIC_API_URL
+    : (Platform.OS === 'web' ? '' : 'http://localhost:3001');
 
 // Define safe SpeechRecognition types for TypeScript in environments without DOM Speech types
 interface WebSpeechRecognitionEvent {
@@ -50,6 +56,28 @@ interface WebSpeechRecognition {
   start: () => void;
   stop: () => void;
   abort: () => void;
+}
+
+function downsampleTo16k(samples: Float32Array, inputSampleRate: number): Float32Array {
+  if (inputSampleRate === 16000) return samples;
+  const ratio = inputSampleRate / 16000;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < samples.length; i++) {
+      accum += samples[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
 }
 
 function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
@@ -125,14 +153,29 @@ function useWebRecorder(): UseSpeechRecorder {
     // 1. Start Web Audio API PCM capture (works reliably in all browsers)
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
         streamRef.current = stream;
 
         const AudioCtx =
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         if (AudioCtx) {
-          const ctx = new AudioCtx({ sampleRate: 16000 });
+          let ctx: AudioContext;
+          try {
+            ctx = new AudioCtx({ sampleRate: 16000 });
+          } catch {
+            ctx = new AudioCtx();
+          }
+          if (ctx.state === 'suspended') {
+            await ctx.resume();
+          }
           audioContextRef.current = ctx;
 
           const source = ctx.createMediaStreamSource(stream);
@@ -209,7 +252,7 @@ function useWebRecorder(): UseSpeechRecorder {
     timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
   }, []);
 
-  const stopRecording = useCallback((): Promise<string> => {
+  const stopRecording = useCallback((): Promise<SpeechRecordingResult> => {
     return new Promise(async (resolve) => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -245,6 +288,8 @@ function useWebRecorder(): UseSpeechRecorder {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+
+      const recordedSampleRate = audioContextRef.current?.sampleRate || 44100;
       if (audioContextRef.current) {
         try {
           audioContextRef.current.close();
@@ -254,27 +299,44 @@ function useWebRecorder(): UseSpeechRecorder {
         audioContextRef.current = null;
       }
 
+      let audioDataUrl: string | null = null;
+      let wavBlob: Blob | null = null;
+      if (audioChunksRef.current.length > 0) {
+        const totalLength = audioChunksRef.current.reduce((acc, cur) => acc + cur.length, 0);
+        const allSamples = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunksRef.current) {
+          allSamples.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        const downsampled = downsampleTo16k(allSamples, recordedSampleRate);
+        wavBlob = encodeWAV(downsampled, 16000);
+
+        try {
+          audioDataUrl = await new Promise<string>((res, rej) => {
+            const reader = new FileReader();
+            reader.onloadend = () => res(reader.result as string);
+            reader.onerror = rej;
+            reader.readAsDataURL(wavBlob!);
+          });
+        } catch (e) {
+          console.warn('Failed to convert wavBlob to data URL:', e);
+        }
+      }
+
       // Check if browser SpeechRecognition already captured words
       const browserSpoken = (finalRef.current || interimTranscript).trim();
       if (browserSpoken.length > 0) {
         setRecorderState('IDLE');
         setInterimTranscript('');
-        resolve(browserSpoken);
+        resolve({ transcript: browserSpoken, audioUrl: audioDataUrl });
         return;
       }
 
       // Transcribe via Backend Whisper if speech recognition returned empty
-      if (audioChunksRef.current.length > 0) {
+      if (wavBlob) {
         try {
-          const totalLength = audioChunksRef.current.reduce((acc, cur) => acc + cur.length, 0);
-          const allSamples = new Float32Array(totalLength);
-          let offset = 0;
-          for (const chunk of audioChunksRef.current) {
-            allSamples.set(chunk, offset);
-            offset += chunk.length;
-          }
-
-          const wavBlob = encodeWAV(allSamples, 16000);
           const formData = new FormData();
           formData.append('audio', wavBlob, 'recording.wav');
 
@@ -289,7 +351,7 @@ function useWebRecorder(): UseSpeechRecorder {
             if (whisperText.length > 0) {
               setRecorderState('IDLE');
               setInterimTranscript('');
-              resolve(whisperText);
+              resolve({ transcript: whisperText, audioUrl: audioDataUrl });
               return;
             }
           }
@@ -301,7 +363,7 @@ function useWebRecorder(): UseSpeechRecorder {
       setRecorderState('IDLE');
       setInterimTranscript('');
       setErrorMessage('Não conseguimos ouvir sua fala. Fale um pouquinho mais alto ou digite a frase abaixo!');
-      resolve('');
+      resolve({ transcript: '', audioUrl: audioDataUrl });
     });
   }, [interimTranscript]);
 
@@ -339,7 +401,7 @@ function useNativeRecorder(): UseSpeechRecorder {
     }
   }, []);
 
-  const stopRecording = useCallback(async (): Promise<string> => {
+  const stopRecording = useCallback(async (): Promise<SpeechRecordingResult> => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setRecorderState('PROCESSING');
 
@@ -359,13 +421,13 @@ function useNativeRecorder(): UseSpeechRecorder {
         if (res.ok) {
           const { transcript } = (await res.json()) as { transcript: string };
           setRecorderState('IDLE');
-          return transcript || '';
+          return { transcript: transcript || '', audioUrl: uri };
         }
       } catch { /* fall through */ }
     }
 
     setRecorderState('IDLE');
-    return '';
+    return { transcript: '', audioUrl: uri };
   }, []);
 
   return {

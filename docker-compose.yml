@@ -27,3 +27,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Cloudflare Tunnel for secure HTTPS mobile access with microphone support
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: antoni-tunnel
+    command: tunnel --no-autoupdate --url http://web:80
+    depends_on:
+      - web
+    restart: unless-stopped

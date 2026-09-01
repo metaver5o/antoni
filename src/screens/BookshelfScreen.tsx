@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
+  Alert,
   Image,
   Modal,
   Platform,
@@ -18,31 +19,93 @@ import {
   Sparkles,
   X,
   Mic,
+  Download,
+  Upload,
+  Share2,
 } from 'lucide-react-native';
 import { useBookshelfStore, SavedBook } from '../store/bookshelfStore';
 import { useGameStore } from '../store/gameStore';
 import { formatSyllableString } from '../lib/syllables';
 import { createBrazilianUtterance, getWordSpans } from '../lib/tts';
+import { exportBookshelfToZip, exportSingleBookToZip, importBookshelfFromZip } from '../lib/zipBackup';
+import { AIProviderBadge } from '../components/AIProviderBadge';
+import { AIProviderModal } from '../components/AIProviderModal';
 
 const logoImg = require('../../assets/logo.jpg');
 
 export const BookshelfScreen: React.FC = () => {
   const isWeb = Platform.OS === 'web';
-  const { books, deleteBook } = useBookshelfStore();
+  const { books, deleteBook, importBooks } = useBookshelfStore();
   const { setScreen } = useGameStore();
 
   const [activeBook, setActiveBook] = useState<SavedBook | null>(null);
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
   const [isPlayingChildVoice, setIsPlayingChildVoice] = useState(false);
   const [activeWordIdx, setActiveWordIdx] = useState(-1);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isSharingBook, setIsSharingBook] = useState(false);
 
-  const htmlAudioRef = React.useRef<HTMLAudioElement | null>(null);
-  const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearTimer = () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+  };
+
+  const handleExportZip = async () => {
+    if (books.length === 0) {
+      Alert.alert('Estante Vazia', 'Crie pelo menos uma história antes de exportar sua coleção!');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      await exportBookshelfToZip(books);
+    } catch (err) {
+      console.error('Export error:', err);
+      Alert.alert('Erro ao exportar', 'Não foi possível gerar o arquivo ZIP da coleção.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const imported = await importBookshelfFromZip(file);
+      const count = await importBooks(imported);
+      Alert.alert('Coleção Importada! 🎉📚', `${count} novas histórias foram adicionadas à sua estante com sucesso!`);
+    } catch (err) {
+      console.error('Import error:', err);
+      Alert.alert('Erro na Importação', 'Não foi possível ler o arquivo ZIP/JSON selecionado.');
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const triggerImportClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleShareBook = async () => {
+    if (!activeBook) return;
+    setIsSharingBook(true);
+    try {
+      await exportSingleBookToZip(activeBook);
+    } catch (err) {
+      console.error('Share book error:', err);
+      Alert.alert('Erro ao compartilhar', 'Não foi possível compartilhar este livro.');
+    } finally {
+      setIsSharingBook(false);
     }
   };
 
@@ -141,14 +204,24 @@ export const BookshelfScreen: React.FC = () => {
     }
 
     setIsPlayingChildVoice(true);
-    if (!htmlAudioRef.current) {
-      htmlAudioRef.current = new Audio(activeBook.childAudioUrl);
-    } else {
-      htmlAudioRef.current.src = activeBook.childAudioUrl;
+    const audio = htmlAudioRef.current || new (window.Audio || Audio)(activeBook.childAudioUrl);
+    htmlAudioRef.current = audio;
+    if (audio.src !== activeBook.childAudioUrl) {
+      audio.src = activeBook.childAudioUrl;
     }
-    htmlAudioRef.current.onended = () => setIsPlayingChildVoice(false);
-    htmlAudioRef.current.onerror = () => setIsPlayingChildVoice(false);
-    htmlAudioRef.current.play();
+    audio.currentTime = 0;
+    audio.onended = () => setIsPlayingChildVoice(false);
+    audio.onerror = (e) => {
+      console.warn('Child audio playback error:', e);
+      setIsPlayingChildVoice(false);
+    };
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        console.warn('Audio play error in Bookshelf:', err);
+        setIsPlayingChildVoice(false);
+      });
+    }
   };
 
   return (
@@ -202,15 +275,88 @@ export const BookshelfScreen: React.FC = () => {
           <Text style={{ fontSize: 18, fontWeight: '900', color: '#FFF' }}>Minha Estante 📚</Text>
         </View>
 
-        <View style={{ width: 40 }} />
+        <AIProviderBadge />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, flexGrow: 1 }}>
-        <Text style={{ fontSize: 15, fontWeight: '700', color: '#78350F', textAlign: 'center', marginBottom: 20 }}>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: '#78350F', textAlign: 'center', marginBottom: 12 }}>
           {books.length === 1
             ? 'Você tem 1 história mágica guardada!'
             : `Você tem ${books.length} histórias mágicas na sua biblioteca!`}
         </Text>
+
+        {/* Backup ZIP & Import Actions */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 12,
+            marginBottom: 24,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Pressable
+            onPress={handleExportZip}
+            disabled={isExporting}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: isExporting ? '#9CA3AF' : pressed ? '#1E3A8A' : '#2563EB',
+              paddingHorizontal: 14,
+              paddingVertical: 9,
+              borderRadius: 14,
+              shadowColor: '#2563EB',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.2,
+              shadowRadius: 4,
+              elevation: 3,
+              cursor: isWeb && !isExporting ? ('pointer' as const) : undefined,
+            })}
+          >
+            <Download size={16} color="#FFF" />
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>
+              {isExporting ? 'Gerando ZIP...' : 'Salvar Coleção (.ZIP) 📦'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={triggerImportClick}
+            disabled={isImporting}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: isImporting ? '#9CA3AF' : pressed ? '#047857' : '#059669',
+              paddingHorizontal: 14,
+              paddingVertical: 9,
+              borderRadius: 14,
+              shadowColor: '#059669',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.2,
+              shadowRadius: 4,
+              elevation: 3,
+              cursor: isWeb && !isImporting ? ('pointer' as const) : undefined,
+            })}
+          >
+            <Upload size={16} color="#FFF" />
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>
+              {isImporting ? 'Importando...' : 'Importar Livros 📥'}
+            </Text>
+          </Pressable>
+
+          {/* Hidden input on Web for picking ZIP/JSON */}
+          {isWeb && (
+            <input
+              ref={fileInputRef as unknown as React.RefObject<HTMLInputElement>}
+              type="file"
+              accept=".zip,.json,application/zip"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+          )}
+        </View>
 
         {/* Bookshelf Grid */}
         <View
@@ -509,6 +655,28 @@ export const BookshelfScreen: React.FC = () => {
                     </Pressable>
                   )}
 
+                  {/* Share individual book button (AirDrop / Share Sheet) */}
+                  <Pressable
+                    onPress={handleShareBook}
+                    disabled={isSharingBook}
+                    style={({ pressed }) => ({
+                      backgroundColor: isSharingBook ? '#9CA3AF' : pressed ? '#1E40AF' : '#2563EB',
+                      paddingVertical: 14,
+                      borderRadius: 16,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      opacity: pressed ? 0.9 : 1,
+                      cursor: isWeb && !isSharingBook ? ('pointer' as const) : undefined,
+                    })}
+                  >
+                    <Share2 size={20} color="#FFF" />
+                    <Text style={{ fontSize: 16, fontWeight: '900', color: '#FFF' }}>
+                      {isSharingBook ? 'Preparando...' : 'Compartilhar História (AirDrop) 📤'}
+                    </Text>
+                  </Pressable>
+
                   {/* Delete button */}
                   <Pressable
                     onPress={() => {
@@ -522,7 +690,7 @@ export const BookshelfScreen: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 6,
-                      marginTop: 10,
+                      marginTop: 6,
                       padding: 8,
                     }}
                   >
@@ -537,6 +705,9 @@ export const BookshelfScreen: React.FC = () => {
           </View>
         </Modal>
       )}
+
+      {/* Multi-AI Provider Switcher & Key Modal */}
+      <AIProviderModal />
     </View>
   );
 };

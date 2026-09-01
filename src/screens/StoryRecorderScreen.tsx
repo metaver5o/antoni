@@ -13,13 +13,15 @@ import { useSpeechRecorder } from '../lib/useSpeechRecorder';
 import { parseNarrative } from '../lib/aiParser';
 import { useGameStore } from '../store/gameStore';
 import { useBookshelfStore } from '../store/bookshelfStore';
+import { AIProviderBadge } from '../components/AIProviderBadge';
+import { AIProviderModal } from '../components/AIProviderModal';
 
 const logoImg = require('../../assets/logo.jpg');
 
 export const StoryRecorderScreen: React.FC = () => {
   const { recorderState, interimTranscript, elapsedSeconds, errorMessage, startRecording, stopRecording, clearError } =
     useSpeechRecorder();
-  const { setScreen, setTranscript, setParsedStory } = useGameStore();
+  const { setScreen, setTranscript, setChildAudioUrl, setParsedStory } = useGameStore();
   const { books } = useBookshelfStore();
   const [customText, setCustomText] = useState('');
 
@@ -65,11 +67,12 @@ export const StoryRecorderScreen: React.FC = () => {
     if (recorderState === 'IDLE') {
       await startRecording();
     } else if (isRecording) {
-      const transcript = await stopRecording();
+      const { transcript, audioUrl } = await stopRecording();
       if (!transcript || transcript.trim().length === 0) {
         return;
       }
       setTranscript(transcript);
+      setChildAudioUrl(audioUrl || null);
       setScreen('PROCESSING');
 
       // Let the processing screen render one frame, then parse
@@ -92,6 +95,7 @@ export const StoryRecorderScreen: React.FC = () => {
 
   const handleSelectSample = async (sampleText: string) => {
     setTranscript(sampleText);
+    setChildAudioUrl(null);
     setScreen('PROCESSING');
     setTimeout(async () => {
       const story = await parseNarrative(sampleText);
@@ -108,12 +112,25 @@ export const StoryRecorderScreen: React.FC = () => {
           alignItems: 'center',
           justifyContent: 'center',
           paddingHorizontal: 24,
-          paddingTop: 36,
+          paddingTop: 48,
           paddingBottom: 40,
         }}
       >
-      {/* Top Bookshelf Bar */}
-      <View style={{ position: 'absolute', top: 20, right: 20, zIndex: 10 }}>
+      {/* Top Bar: AI Provider Switcher + Bookshelf */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          right: 16,
+          zIndex: 10,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <AIProviderBadge />
+
         <Pressable
           onPress={() => setScreen('BOOKSHELF')}
           style={({ pressed }) => ({
@@ -121,8 +138,8 @@ export const StoryRecorderScreen: React.FC = () => {
             alignItems: 'center',
             gap: 6,
             backgroundColor: pressed ? '#EDE9FE' : '#FFFFFF',
-            paddingHorizontal: 14,
-            paddingVertical: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
             borderRadius: 16,
             borderWidth: 1.5,
             borderColor: '#C4B5FD',
@@ -134,9 +151,9 @@ export const StoryRecorderScreen: React.FC = () => {
             cursor: isWeb ? ('pointer' as const) : undefined,
           })}
         >
-          <BookOpen size={18} color="#7C3AED" />
-          <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6' }}>
-            Minha Estante ({books.length})
+          <BookOpen size={16} color="#7C3AED" />
+          <Text style={{ fontSize: 12, fontWeight: '800', color: '#5B21B6' }}>
+            Estante ({books.length})
           </Text>
         </Pressable>
       </View>
@@ -394,6 +411,9 @@ export const StoryRecorderScreen: React.FC = () => {
         </View>
       )}
       </ScrollView>
+
+      {/* Multi-AI Provider Switcher & Key Modal */}
+      <AIProviderModal />
     </View>
   );
 };

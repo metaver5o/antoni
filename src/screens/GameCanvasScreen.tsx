@@ -18,14 +18,18 @@ import { ChildVoiceRecorder } from '../components/ChildVoiceRecorder';
 import { Gap } from '../types';
 
 export const GameCanvasScreen: React.FC = () => {
-  const { parsedStory, isWon, selectedCardId, reset, setScreen } = useGameStore();
+  const { parsedStory, isWon, selectedCardId, reset, setScreen, childAudioUrl, setChildAudioUrl } = useGameStore();
   const { playKaraoke } = useAudio();
   const { books, saveBook } = useBookshelfStore();
   const isWeb = Platform.OS === 'web';
 
   const [isDrawingModalOpen, setIsDrawingModalOpen] = useState(false);
-  const [recordedChildAudio, setRecordedChildAudio] = useState<string | null>(null);
+  const [recordedChildAudio, setRecordedChildAudio] = useState<string | null>(childAudioUrl);
   const [hasSavedBook, setHasSavedBook] = useState(false);
+
+  useEffect(() => {
+    setRecordedChildAudio(childAudioUrl);
+  }, [childAudioUrl]);
 
   // Shuffled sticker cards state for active pedagogical challenge
   const [shuffledGaps, setShuffledGaps] = useState<Gap[]>(parsedStory?.gaps || []);
@@ -84,7 +88,7 @@ export const GameCanvasScreen: React.FC = () => {
       coverColor: coverData.coverColor,
       coverEmoji: coverData.coverEmoji,
       drawingDataUrl: coverData.drawingDataUrl,
-      childAudioUrl: recordedChildAudio,
+      childAudioUrl: recordedChildAudio || childAudioUrl,
     });
     setHasSavedBook(true);
     Alert.alert('Livro Guardado! 🎉📚', 'Sua história foi guardada na sua estante com seu desenho e sua voz!', [
@@ -294,8 +298,11 @@ export const GameCanvasScreen: React.FC = () => {
               {/* Child Voice Recorder */}
               <ChildVoiceRecorder
                 storyText={fullStory}
-                onRecordedAudio={(url) => setRecordedChildAudio(url)}
-                initialAudioUrl={recordedChildAudio}
+                onRecordedAudio={(url) => {
+                  setRecordedChildAudio(url);
+                  setChildAudioUrl(url);
+                }}
+                initialAudioUrl={recordedChildAudio || childAudioUrl}
               />
 
               {/* Action Buttons: Draw Cover & Save to Bookshelf */}

@@ -9,6 +9,59 @@ interface Props {
   initialAudioUrl?: string | null;
 }
 
+function downsampleTo16k(samples: Float32Array, inputSampleRate: number): Float32Array {
+  if (inputSampleRate === 16000) return samples;
+  const ratio = inputSampleRate / 16000;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < samples.length; i++) {
+      accum += samples[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function encodeWAV(samples: Float32Array, sampleRate: number): Blob {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
 export const ChildVoiceRecorder: React.FC<Props> = ({
   storyText,
   onRecordedAudio,
@@ -20,8 +73,12 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
   const [audioUrl, setAudioUrl] = useState<string | null>(initialAudioUrl);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioChunksRef = useRef<Float32Array[]>([]);
+
   const nativeRecordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -34,6 +91,10 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
         htmlAudioRef.current.pause();
       }
       soundRef.current?.unloadAsync();
+      processorRef.current?.disconnect();
+      sourceRef.current?.disconnect();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      audioContextRef.current?.close();
     };
   }, []);
 
@@ -41,6 +102,7 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
     setAudioUrl(null);
     setElapsedSeconds(0);
     setIsRecording(true);
+    audioChunksRef.current = [];
 
     timerRef.current = setInterval(() => {
       setElapsedSeconds((s) => s + 1);
@@ -48,32 +110,47 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
 
     if (isWeb && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-        audioChunksRef.current = [];
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        streamRef.current = stream;
 
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data);
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          let ctx: AudioContext;
+          try {
+            ctx = new AudioCtx({ sampleRate: 16000 });
+          } catch {
+            ctx = new AudioCtx();
           }
-        };
+          if (ctx.state === 'suspended') {
+            await ctx.resume();
+          }
+          audioContextRef.current = ctx;
 
-        mediaRecorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const reader = new FileReader();
-          reader.readAsDataURL(audioBlob);
-          reader.onloadend = () => {
-            const base64data = reader.result as string;
-            setAudioUrl(base64data);
-            onRecordedAudio(base64data);
+          const source = ctx.createMediaStreamSource(stream);
+          sourceRef.current = source;
+
+          const processor = ctx.createScriptProcessor(4096, 1, 1);
+          processorRef.current = processor;
+
+          processor.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            audioChunksRef.current.push(new Float32Array(input));
           };
-          stream.getTracks().forEach((track) => track.stop());
-        };
 
-        mediaRecorder.start();
+          source.connect(processor);
+          processor.connect(ctx.destination);
+        }
       } catch (err) {
-        console.warn('MediaRecorder error:', err);
+        console.warn('Child Voice AudioContext error:', err);
         setIsRecording(false);
         if (timerRef.current) clearInterval(timerRef.current);
       }
@@ -101,11 +178,35 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
     }
     setIsRecording(false);
 
-    if (isWeb && mediaRecorderRef.current) {
+    if (isWeb && audioChunksRef.current.length > 0) {
       try {
-        mediaRecorderRef.current.stop();
+        const recordedSampleRate = audioContextRef.current?.sampleRate || 44100;
+        const totalLength = audioChunksRef.current.reduce((acc, cur) => acc + cur.length, 0);
+        const allSamples = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of audioChunksRef.current) {
+          allSamples.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        if (processorRef.current) processorRef.current.disconnect();
+        if (sourceRef.current) sourceRef.current.disconnect();
+        if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+        if (audioContextRef.current) audioContextRef.current.close();
+
+        // Downsample accurately to 16kHz for universal compatibility & small storage size
+        const downsampled = downsampleTo16k(allSamples, recordedSampleRate);
+        const wavBlob = encodeWAV(downsampled, 16000);
+
+        const reader = new FileReader();
+        reader.readAsDataURL(wavBlob);
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          setAudioUrl(base64data);
+          onRecordedAudio(base64data);
+        };
       } catch (err) {
-        console.warn('Stop MediaRecorder error:', err);
+        console.warn('Stop recording error:', err);
       }
     } else if (nativeRecordingRef.current) {
       try {
@@ -128,6 +229,7 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
     if (isPlaying) {
       if (isWeb && htmlAudioRef.current) {
         htmlAudioRef.current.pause();
+        htmlAudioRef.current.currentTime = 0;
       } else if (soundRef.current) {
         await soundRef.current.pauseAsync();
       }
@@ -135,14 +237,24 @@ export const ChildVoiceRecorder: React.FC<Props> = ({
     } else {
       setIsPlaying(true);
       if (isWeb) {
-        if (!htmlAudioRef.current) {
-          htmlAudioRef.current = new window.Audio(audioUrl);
-        } else {
-          htmlAudioRef.current.src = audioUrl;
+        const audio = htmlAudioRef.current || new (window.Audio || Audio)(audioUrl);
+        htmlAudioRef.current = audio;
+        if (audio.src !== audioUrl) {
+          audio.src = audioUrl;
         }
-        htmlAudioRef.current.onended = () => setIsPlaying(false);
-        htmlAudioRef.current.onerror = () => setIsPlaying(false);
-        htmlAudioRef.current.play();
+        audio.currentTime = 0;
+        audio.onended = () => setIsPlaying(false);
+        audio.onerror = (e) => {
+          console.warn('Playback error:', e);
+          setIsPlaying(false);
+        };
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Audio play error:', err);
+            setIsPlaying(false);
+          });
+        }
       } else {
         const { sound } = await Audio.Sound.createAsync({ uri: audioUrl });
         soundRef.current = sound;

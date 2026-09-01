@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~4.0.1",
+    "@types/jszip": "^3.4.0",
     "expo": "~52.0.0",
     "expo-av": "~15.0.2",
     "expo-speech": "~13.0.1",
     "expo-status-bar": "~2.0.0",
+    "jszip": "^3.10.1",
     "lucide-react-native": "^0.460.0",
     "nativewind": "^4.0.36",
     "react": "18.3.1",

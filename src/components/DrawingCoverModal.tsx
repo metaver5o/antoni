@@ -132,9 +132,13 @@ export const DrawingCoverModal: React.FC<Props> = ({
     let drawingDataUrl: string | null = null;
     if (isWeb && canvasRef.current) {
       try {
-        drawingDataUrl = canvasRef.current.toDataURL('image/png');
+        drawingDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.85);
       } catch {
-        drawingDataUrl = null;
+        try {
+          drawingDataUrl = canvasRef.current.toDataURL('image/png');
+        } catch {
+          drawingDataUrl = null;
+        }
       }
     }
     onSave({

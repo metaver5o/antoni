@@ -35,59 +35,161 @@ app.use(express.json());
 const PARSE_SYSTEM = `
 You are an intelligent children's story parser for a Brazilian Portuguese literacy app targeting kids aged 5-7.
 
-Given a child's spoken transcript or written story in Portuguese:
-1. Remove all speech fillers (aí, né, tipo, assim, então, ãh, uh, hmm, sabe, quer dizer, daí).
-2. Clean up grammar into 1 to 4 clear, rhythmic, age-appropriate sentences.
-3. Identify concrete, easily-visualizable nouns in chronological order:
-   - For short stories (1-2 sentences): select exactly 3 key nouns.
-   - For medium stories (2-3 sentences): select 4 or 5 key nouns.
-   - For longer stories (3+ sentences): select up to 6 key nouns.
-4. In "cleanStory", replace each chosen noun with its corresponding marker: [1], [2], [3] (up to [4], [5], [6] if longer). Every marker must appear exactly once in cleanStory.
-5. In "gaps", create the array of objects matching every marker in order.
+Given a child's spoken transcript or written text in Portuguese:
+1. Preserve the child's authentic words, characters, and ideas as closely as possible. Do NOT replace their words with unrelated stories.
+2. Remove speech fillers (aí, né, tipo, assim, então, ãh, uh, hmm, sabe, quer dizer, daí).
+3. Clean up grammar and punctuation into 1 to 4 clear, age-appropriate Portuguese sentences based directly on what was said.
+4. Extract 1 to 6 concrete, prominent words/nouns from the text in chronological order:
+   - For very short phrases (e.g. "teste do app" or "o gato miou"): extract 1 or 2 key words.
+   - For standard stories: extract 3 to 5 words.
+   - For longer stories: extract up to 6 words.
+5. In "cleanStory", replace each chosen word with its marker: [1], [2], [3] (up to [N]). Every marker must appear exactly once in cleanStory.
+6. In "gaps", create the array of objects matching every marker in order.
 
 Return ONLY a valid JSON object with this exact structure and no markdown fences:
 {
-  "cleanStory": "O [1] correu atras da [2] no [3] e subiu na [4].",
+  "cleanStory": "O [1] correu atras da [2] no [3].",
   "gaps": [
     { "id": 1, "word": "CACHORRO", "icon": "paw-print" },
     { "id": 2, "word": "BOLA",     "icon": "circle"    },
-    { "id": 3, "word": "PARQUE",   "icon": "leaf"      },
-    { "id": 4, "word": "ARVORE",   "icon": "leaf"      }
+    { "id": 3, "word": "PARQUE",   "icon": "leaf"      }
   ]
 }
 
 Rules:
-- "word" must be in UPPERCASE Portuguese
-- "icon" must be one of: paw-print, circle, leaf, star, heart, home, sun, fish, bird, car, book, apple, flower, moon, cloud, music, smile, gift
-- Choose the icon that best represents the word visually
-- Each [N] marker in cleanStory must have an exact matching { id: N, word: "..." } in gaps
-- If the transcript is too short or unintelligible, create a whimsical 3-word story about animals and nature.
+- "word" MUST be extracted directly from the input text, in UPPERCASE Portuguese without punctuation or special symbols.
+- "icon" must be one of: paw-print, circle, leaf, star, heart, home, sun, fish, bird, car, book, apple, flower, moon, cloud, music, smile, gift, sparkles
+- Choose the icon that best represents each word visually (e.g. animals -> paw-print/bird/fish, places -> home/leaf, objects/devices -> car/book/gift/circle/apple, nature -> sun/moon/cloud/flower/leaf/star, joy/fun -> smile/music/sparkles/heart).
+- Each [N] marker in cleanStory must have an exact matching { id: N, word: "..." } in gaps.
 `.trim();
+
+// ---------------------------------------------------------------------------
+// Multi-AI Provider Execution Helpers
+// ---------------------------------------------------------------------------
+async function parseWithClaude({ transcript, apiKey, model }) {
+  const customClient = apiKey ? new Anthropic.Anthropic({ apiKey }) : client;
+  const message = await customClient.messages.create({
+    model: model || 'claude-haiku-4-5-20251001',
+    max_tokens: 512,
+    system: PARSE_SYSTEM,
+    messages: [{ role: 'user', content: transcript }],
+  });
+  return message.content[0]?.type === 'text' ? message.content[0].text : '';
+}
+
+async function parseWithGemini({ transcript, apiKey, model }) {
+  const key = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!key) throw new Error('API Key para Google Gemini não informada');
+  const targetModel = model || 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`;
+
+  const payload = {
+    system_instruction: { parts: [{ text: PARSE_SYSTEM }] },
+    contents: [{ parts: [{ text: transcript }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Google Gemini error (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function parseWithOpenAICompatible({ transcript, apiKey, model, baseUrl, defaultKeyEnv }) {
+  const key = apiKey || (defaultKeyEnv ? process.env[defaultKeyEnv] : '');
+  if (!key) throw new Error(`API Key não informada para ${baseUrl || 'provedor'}`);
+
+  const endpoint = `${(baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`;
+  const payload = {
+    model: model,
+    messages: [
+      { role: 'system', content: PARSE_SYSTEM },
+      { role: 'user', content: transcript },
+    ],
+    temperature: 0.2,
+  };
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API error (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/parse  — transcript -> structured story JSON
 // ---------------------------------------------------------------------------
 app.post('/api/parse', async (req, res) => {
-  const { transcript } = req.body ?? {};
+  const { transcript, provider = 'claude', apiKey = '', model = '', baseUrl = '' } = req.body ?? {};
   if (!transcript || typeof transcript !== 'string') {
     return res.status(400).json({ error: 'transcript is required' });
   }
 
   try {
-    const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      system: PARSE_SYSTEM,
-      messages: [{ role: 'user', content: transcript }],
-    });
+    let raw = '';
+    console.log(`[AI Parser] Request with provider: ${provider}, model: ${model || 'default'}`);
 
-    const raw = message.content[0]?.type === 'text' ? message.content[0].text : '';
+    if (provider === 'gemini') {
+      raw = await parseWithGemini({ transcript, apiKey, model });
+    } else if (provider === 'grok') {
+      raw = await parseWithOpenAICompatible({
+        transcript,
+        apiKey,
+        model: model || 'grok-2-latest',
+        baseUrl: 'https://api.x.ai/v1',
+        defaultKeyEnv: 'XAI_API_KEY',
+      });
+    } else if (provider === 'openai') {
+      raw = await parseWithOpenAICompatible({
+        transcript,
+        apiKey,
+        model: model || 'gpt-4o-mini',
+        baseUrl: 'https://api.openai.com/v1',
+        defaultKeyEnv: 'OPENAI_API_KEY',
+      });
+    } else if (provider === 'custom') {
+      raw = await parseWithOpenAICompatible({
+        transcript,
+        apiKey,
+        model: model || 'anthropic/claude-3.5-haiku',
+        baseUrl: baseUrl || 'https://openrouter.ai/api/v1',
+      });
+    } else {
+      // Default: Claude
+      raw = await parseWithClaude({ transcript, apiKey, model });
+    }
+
+    console.log(`[AI Parser] Raw response (${provider}):`, raw);
 
     // Strip markdown code fences if the model wraps its JSON
     const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
     const parsed = JSON.parse(jsonText);
 
-    if (!parsed.cleanStory || !Array.isArray(parsed.gaps) || parsed.gaps.length < 2) {
+    if (!parsed.cleanStory || !Array.isArray(parsed.gaps) || parsed.gaps.length < 1) {
+      console.warn('Invalid parsed shape:', parsed);
       throw new Error('Unexpected response shape from model');
     }
 
@@ -106,7 +208,7 @@ app.post('/api/parse', async (req, res) => {
       .filter(Boolean);
 
     // If cleanStory had no markers or something broke, re-inject markers for all gaps
-    if (alignedGaps.length === 0 && parsed.gaps.length >= 2) {
+    if (alignedGaps.length === 0 && parsed.gaps.length >= 1) {
       let story = parsed.cleanStory;
       parsed.gaps.forEach((g) => {
         const wordRegex = new RegExp(`\\b${g.word}\\b`, 'i');
@@ -118,13 +220,14 @@ app.post('/api/parse', async (req, res) => {
       alignedGaps = parsed.gaps.filter((g) => parsed.cleanStory.includes(`[${g.id}]`));
     }
 
-    if (alignedGaps.length < 2) {
+    if (alignedGaps.length < 1) {
       throw new Error('Could not synchronize story gaps');
     }
 
     return res.json({
       cleanStory: parsed.cleanStory,
       gaps: alignedGaps,
+      usedProvider: provider,
     });
   } catch (err) {
     console.error('/api/parse error:', err?.message ?? err);
@@ -136,6 +239,7 @@ app.post('/api/parse', async (req, res) => {
         { id: 2, word: 'BOLA',     icon: 'circle'    },
         { id: 3, word: 'PARQUE',   icon: 'leaf'      },
       ],
+      usedProvider: 'fallback',
     });
   }
 });

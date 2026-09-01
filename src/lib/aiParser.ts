@@ -1,9 +1,11 @@
+import { Platform } from 'react-native';
 import type { ParsedStory, StorySegment } from '../types';
 
-// Resolved at build time by Expo's env injector; falls back to localhost.
+// Resolved at build time by Expo's env injector; defaults to same-origin on web
 const API_URL =
-  (typeof process !== 'undefined' && process.env.EXPO_PUBLIC_API_URL) ||
-  'http://localhost:3001';
+  typeof process !== 'undefined' && typeof process.env.EXPO_PUBLIC_API_URL === 'string'
+    ? process.env.EXPO_PUBLIC_API_URL
+    : (Platform.OS === 'web' ? '' : 'http://localhost:3001');
 
 // Comprehensive icon keywords mapping in Portuguese
 const ICON_KEYWORD_MAP: Record<string, string> = {
@@ -149,22 +151,32 @@ function parseLocallyFromTranscript(rawTranscript: string): ParsedStory {
   return { cleanStory: storyText, gaps };
 }
 
+import { useAIProviderStore } from '../store/aiProviderStore';
+
 export async function parseNarrative(transcript: string): Promise<ParsedStory> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    const aiConfig = useAIProviderStore.getState().getActiveConfig();
 
     const res = await fetch(`${API_URL}/api/parse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript }),
+      body: JSON.stringify({
+        transcript,
+        provider: aiConfig.provider,
+        apiKey: aiConfig.apiKey,
+        model: aiConfig.model,
+        baseUrl: aiConfig.baseUrl,
+      }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
 
     if (!res.ok) throw new Error(`API ${res.status}`);
     const data = (await res.json()) as ParsedStory;
-    if (!data.cleanStory || !Array.isArray(data.gaps) || data.gaps.length < 2) {
+    if (!data.cleanStory || !Array.isArray(data.gaps) || data.gaps.length < 1) {
       throw new Error('Invalid API response shape');
     }
     // Filter gaps to ensure only gaps that actually exist in cleanStory are returned

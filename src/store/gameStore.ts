@@ -15,12 +15,14 @@ interface GameStore {
 
   isPlayingKaraoke: boolean;
   karaokeWordIndex: number;
+  childAudioUrl: string | null;
 
   // absolute screen coords populated by each GapSlot via onLayout+measure
   slotLayouts: Record<number, SlotLayout>;
 
   setScreen: (screen: AppScreen) => void;
   setTranscript: (transcript: string) => void;
+  setChildAudioUrl: (url: string | null) => void;
   setParsedStory: (story: ParsedStory) => void;
   selectCard: (gapId: number | null) => void;
   /** Returns true when placement is correct. */
@@ -36,6 +38,7 @@ const INITIAL: Omit<
   GameStore,
   | 'setScreen'
   | 'setTranscript'
+  | 'setChildAudioUrl'
   | 'setParsedStory'
   | 'selectCard'
   | 'tryPlaceCard'
@@ -48,6 +51,7 @@ const INITIAL: Omit<
   screen: 'RECORDER',
   transcript: '',
   parsedStory: null,
+  childAudioUrl: null,
   placedCards: {},
   selectedCardId: null,
   incorrectSlotId: null,
@@ -64,6 +68,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setScreen: (screen) => set({ screen }),
   setTranscript: (transcript) => set({ transcript }),
+  setChildAudioUrl: (childAudioUrl) => set({ childAudioUrl }),
   setParsedStory: (parsedStory) => set({ parsedStory }),
   selectCard: (selectedCardId) => set({ selectedCardId }),
 
